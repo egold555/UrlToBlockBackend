@@ -33,6 +33,30 @@ namespace EGoldBlockCreator.Controllers
             }
         }
 
+        public string GetTextures(string uuid)
+        {
+            Guid guid;
+            if (!string.IsNullOrWhiteSpace(uuid) && Guid.TryParse(uuid, out guid))
+            {
+                List<int> used = UsedDamages(guid);
+                StringBuilder builder = new StringBuilder();
+                bool first = true;
+                foreach (int d in used)
+                {
+                    if (!first)
+                        builder.Append(',');
+                    builder.Append(d.ToString());
+                    first = false;
+                }
+
+                return builder.ToString();
+            }
+            else
+            {
+                return "@FAILURE: uuid is not in a recognized format";
+            }
+        }
+
         public string AddTexture(string uuid, string texture)
         {
             Guid guid;
@@ -88,7 +112,6 @@ namespace EGoldBlockCreator.Controllers
             {
                 return "@FAILURE: uuid is not in a recognized format";
             }
-
         }
 
         private string ReadTexture(string textureUrl, out string error)
@@ -109,22 +132,6 @@ namespace EGoldBlockCreator.Controllers
 
             return fileName;
         }
-
-        /*
-public string CreateBlob()
-{
-   // Retrieve reference to a blob named "blob66".
-   CloudBlockBlob blockBlob = BlobContainer.GetBlockBlobReference("blob66");
-
-   // Create or overwrite the "myblob" blob with contents from a local file.
-   using (var fileStream = System.IO.File.OpenRead(Server.MapPath("~/App_Data/MyTextFile64.txt")))
-   {
-       blockBlob.UploadFromStream(fileStream);
-   }
-
-   return blockBlob.Uri.ToString();
-}
-*/
 
         List<int> UsedDamages(Guid guid)
         {
@@ -187,9 +194,10 @@ public string CreateBlob()
             blob.DownloadToFile(tempPath, FileMode.Create);
             ZipFile zipFile = ZipFile.Read(tempPath);
             bool changed = processZip(zipFile);
+            zipFile.Save();
+            zipFile.Dispose();
             if (changed)
             {
-                zipFile.Save();
                 blob.UploadFromFile(tempPath);
             }
             System.IO.File.Delete(tempPath);
