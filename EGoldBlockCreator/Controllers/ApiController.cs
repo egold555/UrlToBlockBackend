@@ -1,9 +1,13 @@
-﻿using Microsoft.Azure;
+﻿using Ionic.Zip;
+using Microsoft.Azure;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Blob;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Net;
+using System.Text;
 using System.Web;
 using System.Web.Mvc;
 
@@ -11,6 +15,9 @@ namespace EGoldBlockCreator.Controllers
 {
     public class ApiController : Controller
     {
+        CloudBlobContainer blobContainer = null;
+        const int maxDamage = 1559;
+
         public string GetUrl(string uuid)
         {
             Guid guid;
@@ -25,23 +32,168 @@ namespace EGoldBlockCreator.Controllers
                 return "@FAILURE: uuid is not in a recognized format";
             }
         }
-        /*
-        public string CreateBlob()
-        {
-            // Retrieve reference to a blob named "blob66".
-            CloudBlockBlob blockBlob = BlobContainer.GetBlockBlobReference("blob66");
 
-            // Create or overwrite the "myblob" blob with contents from a local file.
-            using (var fileStream = System.IO.File.OpenRead(Server.MapPath("~/App_Data/MyTextFile64.txt")))
+        public string AddTexture(string uuid, string texture)
+        {
+            Guid guid;
+
+            if (!string.IsNullOrWhiteSpace(uuid) && Guid.TryParse(uuid, out guid))
             {
-                blockBlob.UploadFromStream(fileStream);
+                string error = null;
+                Uri url = new Uri(texture);
+                string textureFile = ReadTexture(texture, out error);
+                if (textureFile == null)
+                {
+                    return "@FAILURE: Could not read texture: " + error;
+                }
+
+                int damage = -1;
+
+                error = null;
+
+                using (Stream stm = new FileStream(textureFile, FileMode.Open, FileAccess.Read))
+                {
+                    UpdateZip(guid, (ZipFile zipFile) => {
+                        damage = FirstFreeDamage(zipFile);
+                        if (damage < 0)
+                        {
+                            error = "No free textures";
+                            return false;
+                        }
+
+                        string textureName = TextureName(damage);
+                        zipFile.AddEntry(textureName, stm);
+
+                        string modelName = ModelName(damage);
+                        string modelContent = System.IO.File.ReadAllText(Server.MapPath("~/App_Data/default_model.json"), Encoding.UTF8);
+                        modelContent = modelContent.Replace("@DAMAGE@", (damage - 1).ToString());
+                        zipFile.AddEntry(modelName, modelContent, Encoding.UTF8);
+
+                        return true;
+                    });
+                }
+
+                System.IO.File.Delete(textureFile);
+
+                if (string.IsNullOrEmpty(error))
+                {
+                    return damage.ToString();
+                }
+                else
+                {
+                    return "@FAILURE: " + error;
+                }
+            }
+            else
+            {
+                return "@FAILURE: uuid is not in a recognized format";
             }
 
-            return blockBlob.Uri.ToString();
         }
-        */
 
-        CloudBlobContainer blobContainer = null;
+        private string ReadTexture(string textureUrl, out string error)
+        {
+            string fileName = Path.GetTempFileName();
+
+            error = null;
+            try
+            {
+                WebClient webClient = new WebClient();
+                webClient.DownloadFile(textureUrl, fileName);
+            }
+            catch (Exception e)
+            {
+                error = e.Message;
+                return null;
+            }
+
+            return fileName;
+        }
+
+        /*
+public string CreateBlob()
+{
+   // Retrieve reference to a blob named "blob66".
+   CloudBlockBlob blockBlob = BlobContainer.GetBlockBlobReference("blob66");
+
+   // Create or overwrite the "myblob" blob with contents from a local file.
+   using (var fileStream = System.IO.File.OpenRead(Server.MapPath("~/App_Data/MyTextFile64.txt")))
+   {
+       blockBlob.UploadFromStream(fileStream);
+   }
+
+   return blockBlob.Uri.ToString();
+}
+*/
+
+        List<int> UsedDamages(Guid guid)
+        {
+            List<int> used = new List<int>();
+
+            UpdateZip(guid, (ZipFile zipFile) =>
+            {
+                for (int d = 1; d <= maxDamage; ++d)
+                {
+                    if (DamageExists(zipFile, d))
+                        used.Add(d);
+                }
+                return false;
+            });
+
+            return used;
+        }
+
+        int FirstFreeDamage(ZipFile zipFile)
+        {
+            for (int d = 1; d <= maxDamage; ++d)
+            {
+                if (!DamageExists(zipFile, d))
+                    return d;
+            }
+            return -1;
+        }
+
+        private bool DamageExists(ZipFile zipFile, int d)
+        {
+            return zipFile.ContainsEntry(TextureName(d));
+        }
+
+        string TextureName(int d)
+        {
+            return TexturesFolder() + "/customblock_" + (d-1).ToString() + ".png";
+        }
+
+        string ModelName(int d)
+        {
+            return ModelsFolder() + "/customblock_" + (d-1).ToString() + ".json";
+        }
+
+        string TexturesFolder()
+        {
+            return "assets/minecraft/textures/blocks";
+        }
+
+        string ModelsFolder()
+        {
+            return "assets/minecraft/models/block";
+        }
+
+
+
+        void UpdateZip(Guid guid, Func<ZipFile, bool> processZip)
+        {
+            string tempPath = Path.GetTempFileName();
+            CloudBlockBlob blob = GetBlob(guid);
+            blob.DownloadToFile(tempPath, FileMode.Create);
+            ZipFile zipFile = ZipFile.Read(tempPath);
+            bool changed = processZip(zipFile);
+            if (changed)
+            {
+                zipFile.Save();
+                blob.UploadFromFile(tempPath);
+            }
+            System.IO.File.Delete(tempPath);
+        }
 
         CloudBlockBlob GetBlob(Guid guid)
         {
