@@ -11,26 +11,25 @@ namespace EGoldBlockCreator.Controllers
 {
     public class ApiController : Controller
     {
-        // GET: Api
-        public string TestIt()
+        public string GetUrl(string uuid)
         {
-            return "HELLO WORLD";
+            Guid guid;
+            
+            if (!string.IsNullOrWhiteSpace(uuid) && Guid.TryParse(uuid, out guid))
+            {
+                CloudBlockBlob blob = GetBlob(guid);
+                return blob.Uri.ToString();
+            }
+            else
+            {
+                return "@FAILURE: uuid is not in a recognized format";
+            }
         }
-
+        /*
         public string CreateBlob()
         {
-            // Retrieve storage account from connection string.
-            CloudStorageAccount storageAccount = CloudStorageAccount.Parse(
-                CloudConfigurationManager.GetSetting("STORAGE"));
-
-            // Create the blob client.
-            CloudBlobClient blobClient = storageAccount.CreateCloudBlobClient();
-
-            // Retrieve reference to a previously created container.
-            CloudBlobContainer container = blobClient.GetContainerReference("blockcreator");
-
-            // Retrieve reference to a blob named "myblob".
-            CloudBlockBlob blockBlob = container.GetBlockBlobReference("blob66");
+            // Retrieve reference to a blob named "blob66".
+            CloudBlockBlob blockBlob = BlobContainer.GetBlockBlobReference("blob66");
 
             // Create or overwrite the "myblob" blob with contents from a local file.
             using (var fileStream = System.IO.File.OpenRead(Server.MapPath("~/App_Data/MyTextFile64.txt")))
@@ -39,6 +38,45 @@ namespace EGoldBlockCreator.Controllers
             }
 
             return blockBlob.Uri.ToString();
+        }
+        */
+
+        CloudBlobContainer blobContainer = null;
+
+        CloudBlockBlob GetBlob(Guid guid)
+        {
+            CloudBlockBlob blockBlob = BlobContainer.GetBlockBlobReference("rp-" + guid.ToString() + ".zip");
+
+            if (! blockBlob.Exists())
+            {
+                // Create or overwrite the "myblob" blob with contents from a local file.
+                using (var fileStream = System.IO.File.OpenRead(Server.MapPath("~/App_Data/DefaultResourcePack.zip")))
+                {
+                    blockBlob.UploadFromStream(fileStream);
+                }
+            }
+
+            return blockBlob;
+        }
+
+        CloudBlobContainer BlobContainer
+        {
+            get {
+                if (blobContainer == null)
+                {
+                    // Retrieve storage account from connection string.
+                    CloudStorageAccount storageAccount = CloudStorageAccount.Parse(
+                        CloudConfigurationManager.GetSetting("STORAGE"));
+
+                    // Create the blob client.
+                    CloudBlobClient blobClient = storageAccount.CreateCloudBlobClient();
+
+                    // Retrieve reference to a previously created container.
+                    blobContainer = blobClient.GetContainerReference("blockcreator");
+                }
+
+                return blobContainer;
+            }
         }
     }
 }
