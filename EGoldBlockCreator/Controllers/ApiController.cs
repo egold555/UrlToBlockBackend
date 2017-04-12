@@ -114,6 +114,32 @@ namespace EGoldBlockCreator.Controllers
             }
         }
 
+        public string DeleteTexture(string uuid, int damage)
+        {
+            Guid guid;
+
+            if (!string.IsNullOrWhiteSpace(uuid) && Guid.TryParse(uuid, out guid))
+            {
+                UpdateZip(guid, (ZipFile zipFile) => {
+                    string textureName = TextureName(damage);
+                    string modelName = ModelName(damage);
+
+                    if (zipFile.ContainsEntry(textureName))
+                        zipFile.RemoveEntry(textureName);
+                    if (zipFile.ContainsEntry(modelName))
+                        zipFile.RemoveEntry(modelName);
+
+                    return true;
+                });
+
+                return "OK";
+            }
+            else
+            {
+                return "@FAILURE: uuid is not in a recognized format";
+            }
+        }
+
         private string ReadTexture(string textureUrl, out string error)
         {
             string fileName = Path.GetTempFileName();
