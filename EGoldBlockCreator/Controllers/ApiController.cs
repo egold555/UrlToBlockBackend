@@ -93,6 +93,8 @@ namespace EGoldBlockCreator.Controllers
                         modelContent = modelContent.Replace("@DAMAGE@", (damage - 1).ToString());
                         zipFile.AddEntry(modelName, modelContent, Encoding.UTF8);
 
+                        UpdateHoeModel(zipFile);
+
                         return true;
                     });
                 }
@@ -129,6 +131,8 @@ namespace EGoldBlockCreator.Controllers
                     if (zipFile.ContainsEntry(modelName))
                         zipFile.RemoveEntry(modelName);
 
+                    UpdateHoeModel(zipFile);
+
                     return true;
                 });
 
@@ -159,19 +163,67 @@ namespace EGoldBlockCreator.Controllers
             return fileName;
         }
 
+        void UpdateHoeModel(ZipFile zipFile)
+        {
+            List<int> usedDamages = UsedDamages(zipFile);
+            byte[] content = GetHoeModel(usedDamages);
+            zipFile.RemoveEntry(@"/assets/minecraft/models/item/diamond_hoe.json");
+            zipFile.AddEntry(@"/assets/minecraft/models/item/diamond_hoe.json", content);
+        }
+
+        byte[] GetHoeModel(List<int> usedDamages)
+        {
+            MemoryStream stream = new MemoryStream();
+            TextWriter writer = new StreamWriter(stream);
+
+            writer.WriteLine(@"{");
+            writer.WriteLine(@"	""parent"": ""item/handheld"",");
+            writer.WriteLine(@"	""textures"": {");
+            writer.WriteLine(@"		""layer0"": ""items/diamond_hoe""");
+            writer.WriteLine(@"	},");
+            writer.WriteLine(@"	""overrides"": [");
+            writer.WriteLine(@"		{ ""predicate"": {""damaged"": 0, ""damage"": 0}, ""model"": ""item/diamond_hoe""},");
+            writer.WriteLine();
+
+            foreach (int d in usedDamages)
+            {
+                string s = @"		{ ""predicate"": {""damaged"": 0, ""damage"": @DMG@}, ""model"": ""block/customblock_@BLK@""},";
+                s = s.Replace("@DMG@", ((double)d / 1562.0).ToString("R")).Replace("@BLK@", (d - 1).ToString());
+                writer.WriteLine(s);
+            }
+            
+            writer.WriteLine();
+            writer.WriteLine(@"		{ ""predicate"": {""damaged"": 1, ""damage"": 0}, ""model"": ""item/diamond_hoe""}");
+            writer.WriteLine(@"	]");
+            writer.WriteLine(@"}");
+
+            writer.Flush();
+
+            return stream.ToArray();
+        }
+
         List<int> UsedDamages(Guid guid)
         {
             List<int> used = new List<int>();
 
             UpdateZip(guid, (ZipFile zipFile) =>
             {
-                for (int d = 1; d <= maxDamage; ++d)
-                {
-                    if (DamageExists(zipFile, d))
-                        used.Add(d);
-                }
+                used = UsedDamages(zipFile);
                 return false;
             });
+
+            return used;
+        }
+
+        List<int> UsedDamages(ZipFile zipFile)
+        {
+            List<int> used = new List<int>();
+
+            for (int d = 1; d <= maxDamage; ++d)
+            {
+                if (DamageExists(zipFile, d))
+                    used.Add(d);
+            }
 
             return used;
         }
