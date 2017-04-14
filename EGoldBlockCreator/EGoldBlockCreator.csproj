@@ -187,6 +187,8 @@
     </Content>
     <Content Include="App_Data\DefaultResourcePack.zip" />
     <Content Include="App_Data\default_model.json" />
+    <Content Include="App_Data\diamond_hoe.json" />
+    <Content Include="App_Data\mob_spawner_cage.json" />
     <None Include="Properties\PublishProfiles\EGoldBlockCreator - Web Deploy.pubxml" />
     <None Include="Scripts\jquery-1.10.2.intellisense.js" />
     <Content Include="Scripts\jquery-1.10.2.js" />
@@ -210,8 +212,6 @@
     <Content Include="Views\_ViewStart.cshtml" />
     <Content Include="Views\Shared\Error.cshtml" />
     <Content Include="Views\Shared\_Layout.cshtml" />
-    <Content Include="Views\Home\About.cshtml" />
-    <Content Include="Views\Home\Contact.cshtml" />
     <Content Include="Views\Home\Index.cshtml" />
   </ItemGroup>
   <ItemGroup>
@@ -247,7 +247,7 @@
     <VisualStudio>
       <FlavorProperties GUID="{349c5851-65df-11da-9384-00065b846f21}">
         <WebProjectProperties>
-          <UseIIS>True</UseIIS>
+          <UseIIS>False</UseIIS>
           <AutoAssignPort>True</AutoAssignPort>
           <DevelopmentServerPort>57281</DevelopmentServerPort>
           <DevelopmentServerVPath>/</DevelopmentServerVPath>

@@ -18,12 +18,42 @@ namespace EGoldBlockCreator.Controllers
         CloudBlobContainer blobContainer = null;
         const int maxDamage = 1559;
 
-        public string GetUrl(string uuid)
+        public string GetUrl(string uuid, bool spawner)
         {
             Guid guid;
             
             if (!string.IsNullOrWhiteSpace(uuid) && Guid.TryParse(uuid, out guid))
             {
+                UpdateZip(guid, (zipFile) => 
+                {
+                    if (spawner)
+                    {
+                        // We want the file in there.
+                        if (!zipFile.ContainsEntry(MobSpawnerCageName()))
+                        {
+                            zipFile.AddEntry(MobSpawnerCageName(), System.IO.File.ReadAllBytes(Server.MapPath("~/App_Data/mob_spawner_cage.json")));
+                            return true;
+                        }
+                        else
+                        {
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        // We don't want the file in there.
+                        if (zipFile.ContainsEntry(MobSpawnerCageName()))
+                        {
+                            zipFile.RemoveEntry(MobSpawnerCageName());
+                            return true;
+                        }
+                        else
+                        {
+                            return false;
+                        }
+                    }
+                });
+
                 CloudBlockBlob blob = GetBlob(guid);
                 return blob.Uri.ToString();
             }
@@ -55,6 +85,22 @@ namespace EGoldBlockCreator.Controllers
             {
                 return "@FAILURE: uuid is not in a recognized format";
             }
+        }
+
+        public string DeleteAll(string uuid)
+        {
+            Guid guid;
+
+            if (!string.IsNullOrWhiteSpace(uuid) && Guid.TryParse(uuid, out guid))
+            {
+                DeleteBlob(guid);
+                return "OK";
+            }
+            else
+            {
+                return "@FAILURE: uuid is not in a recognized format";
+            }
+
         }
 
         public string AddTexture(string uuid, string texture)
@@ -92,7 +138,7 @@ namespace EGoldBlockCreator.Controllers
                         string modelContent = System.IO.File.ReadAllText(Server.MapPath("~/App_Data/default_model.json"), Encoding.UTF8);
                         modelContent = modelContent.Replace("@DAMAGE@", (damage - 1).ToString());
                         zipFile.AddEntry(modelName, modelContent, Encoding.UTF8);
-
+                        
                         UpdateHoeModel(zipFile);
 
                         return true;
@@ -253,6 +299,11 @@ namespace EGoldBlockCreator.Controllers
             return ModelsFolder() + "/customblock_" + (d-1).ToString() + ".json";
         }
 
+        string MobSpawnerCageName()
+        {
+            return ModelsFolder() + "/mob_spawner_cage.json";
+        }
+
         string TexturesFolder()
         {
             return "assets/minecraft/textures/blocks";
@@ -279,6 +330,15 @@ namespace EGoldBlockCreator.Controllers
                 blob.UploadFromFile(tempPath);
             }
             System.IO.File.Delete(tempPath);
+        }
+        void DeleteBlob(Guid guid)
+        {
+            CloudBlockBlob blockBlob = BlobContainer.GetBlockBlobReference("rp-" + guid.ToString() + ".zip");
+
+            if (blockBlob.Exists())
+            {
+                blockBlob.Delete();
+            }
         }
 
         CloudBlockBlob GetBlob(Guid guid)
