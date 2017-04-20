@@ -4,6 +4,8 @@ using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Blob;
 using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -117,6 +119,24 @@ namespace EGoldBlockCreator.Controllers
                     return "@FAILURE: Could not read texture: " + error;
                 }
 
+                try
+                {
+                    string newTextureFile = TempFile(".png");
+
+                    using (Bitmap bitmap = (Bitmap) Image.FromFile(textureFile))
+                    {
+                        Bitmap newBitmap = RescaleImage(bitmap, GetBestSize(bitmap.Size));
+                        newBitmap.Save(newTextureFile);
+                    }
+
+                    System.IO.File.Delete(textureFile);
+                    textureFile = newTextureFile;
+                }
+                catch (Exception e)
+                {
+                    return ("@FAILURE: The image file appears to be invalid.");
+                }
+
                 int damage = -1;
 
                 error = null;
@@ -190,9 +210,45 @@ namespace EGoldBlockCreator.Controllers
             }
         }
 
+        Size GetBestSize(Size existing)
+        {
+            int size;
+            int biggest = Math.Max(existing.Width, existing.Height);
+            if (biggest >= 256)
+                size = 256;
+            else if (biggest >= 128)
+                size = 128;
+            else if (biggest >= 64)
+                size = 64;
+            else if (biggest >= 32)
+                size = 32;
+            else
+                size = 16;
+
+            return new Size(size, size);
+        }
+
+        Bitmap RescaleImage(Bitmap source, Size size)
+        {
+            // 1st bullet, pixel format
+            var bmp = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppArgb);
+
+            // 2nd bullet, resolution
+            using (var gr = Graphics.FromImage(bmp))
+            {
+                // 3rd bullet, background
+                gr.Clear(Color.Transparent);
+                // 4th bullet, interpolation
+                gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                gr.DrawImage(source, new Rectangle(0, 0, size.Width, size.Height));
+            }
+
+            return bmp;
+        }
+
         private string ReadTexture(string textureUrl, out string error)
         {
-            string fileName = Path.GetTempFileName();
+            string fileName = TempFile(Path.GetExtension(new Uri(textureUrl).AbsolutePath));
 
             error = null;
             try
@@ -318,7 +374,7 @@ namespace EGoldBlockCreator.Controllers
 
         void UpdateZip(Guid guid, Func<ZipFile, bool> processZip)
         {
-            string tempPath = Path.GetTempFileName();
+            string tempPath = TempFile(".zip");
             CloudBlockBlob blob = GetBlob(guid);
             blob.DownloadToFile(tempPath, FileMode.Create);
             ZipFile zipFile = ZipFile.Read(tempPath);
@@ -375,6 +431,11 @@ namespace EGoldBlockCreator.Controllers
 
                 return blobContainer;
             }
+        }
+
+        string TempFile(string extension)
+        {
+            return Path.ChangeExtension(System.IO.Path.GetTempPath() + Guid.NewGuid().ToString(), extension);
         }
     }
 }
