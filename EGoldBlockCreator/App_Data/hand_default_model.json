@@ -1,0 +1,6 @@
+{
+    "parent": "block/hand_custom_block_all",
+    "textures": {
+        "all": "blocks/customblock_@DAMAGE@"
+    }
+}

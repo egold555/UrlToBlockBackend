@@ -132,7 +132,7 @@ namespace EGoldBlockCreator.Controllers
                     System.IO.File.Delete(textureFile);
                     textureFile = newTextureFile;
                 }
-                catch (Exception e)
+                catch (Exception)
                 {
                     return ("@FAILURE: The image file appears to be invalid.");
                 }
@@ -147,7 +147,7 @@ namespace EGoldBlockCreator.Controllers
                         damage = FirstFreeDamage(zipFile);
                         if (damage < 0)
                         {
-                            error = "No free textures";
+                            error = "Maximum number of blocks reached";
                             return false;
                         }
 
@@ -158,8 +158,14 @@ namespace EGoldBlockCreator.Controllers
                         string modelContent = System.IO.File.ReadAllText(Server.MapPath("~/App_Data/default_model.json"), Encoding.UTF8);
                         modelContent = modelContent.Replace("@DAMAGE@", (damage - 1).ToString());
                         zipFile.AddEntry(modelName, modelContent, Encoding.UTF8);
-                        
+
+                        string handModelName = HandModelName(damage);
+                        string handModelContent = System.IO.File.ReadAllText(Server.MapPath("~/App_Data/hand_default_model.json"), Encoding.UTF8);
+                        handModelContent = handModelContent.Replace("@DAMAGE@", (damage - 1).ToString());
+                        zipFile.AddEntry(handModelName, handModelContent, Encoding.UTF8);
+
                         UpdateHoeModel(zipFile);
+                        UpdateAxeModel(zipFile);
 
                         return true;
                     });
@@ -191,13 +197,17 @@ namespace EGoldBlockCreator.Controllers
                 UpdateZip(guid, (ZipFile zipFile) => {
                     string textureName = TextureName(damage);
                     string modelName = ModelName(damage);
+                    string handModelName = HandModelName(damage);
 
                     if (zipFile.ContainsEntry(textureName))
                         zipFile.RemoveEntry(textureName);
                     if (zipFile.ContainsEntry(modelName))
                         zipFile.RemoveEntry(modelName);
+                    if (zipFile.ContainsEntry(handModelName))
+                        zipFile.RemoveEntry(handModelName);
 
                     UpdateHoeModel(zipFile);
+                    UpdateAxeModel(zipFile);
 
                     return true;
                 });
@@ -273,6 +283,14 @@ namespace EGoldBlockCreator.Controllers
             zipFile.AddEntry(@"/assets/minecraft/models/item/diamond_hoe.json", content);
         }
 
+        void UpdateAxeModel(ZipFile zipFile)
+        {
+            List<int> usedDamages = UsedDamages(zipFile);
+            byte[] content = GetAxeModel(usedDamages);
+            zipFile.RemoveEntry(@"/assets/minecraft/models/item/diamond_axe.json");
+            zipFile.AddEntry(@"/assets/minecraft/models/item/diamond_axe.json", content);
+        }
+
         byte[] GetHoeModel(List<int> usedDamages)
         {
             MemoryStream stream = new MemoryStream();
@@ -293,9 +311,40 @@ namespace EGoldBlockCreator.Controllers
                 s = s.Replace("@DMG@", ((double)d / 1562.0).ToString("R")).Replace("@BLK@", (d - 1).ToString());
                 writer.WriteLine(s);
             }
-            
+
             writer.WriteLine();
             writer.WriteLine(@"		{ ""predicate"": {""damaged"": 1, ""damage"": 0}, ""model"": ""item/diamond_hoe""}");
+            writer.WriteLine(@"	]");
+            writer.WriteLine(@"}");
+
+            writer.Flush();
+
+            return stream.ToArray();
+        }
+
+        byte[] GetAxeModel(List<int> usedDamages)
+        {
+            MemoryStream stream = new MemoryStream();
+            TextWriter writer = new StreamWriter(stream);
+
+            writer.WriteLine(@"{");
+            writer.WriteLine(@"	""parent"": ""item/handheld"",");
+            writer.WriteLine(@"	""textures"": {");
+            writer.WriteLine(@"		""layer0"": ""items/diamond_axe""");
+            writer.WriteLine(@"	},");
+            writer.WriteLine(@"	""overrides"": [");
+            writer.WriteLine(@"		{ ""predicate"": {""damaged"": 0, ""damage"": 0}, ""model"": ""item/diamond_axe""},");
+            writer.WriteLine();
+
+            foreach (int d in usedDamages)
+            {
+                string s = @"		{ ""predicate"": {""damaged"": 0, ""damage"": @DMG@}, ""model"": ""block/hand_customblock_@BLK@""},";
+                s = s.Replace("@DMG@", ((double)d / 1562.0).ToString("R")).Replace("@BLK@", (d - 1).ToString());
+                writer.WriteLine(s);
+            }
+
+            writer.WriteLine();
+            writer.WriteLine(@"		{ ""predicate"": {""damaged"": 1, ""damage"": 0}, ""model"": ""item/diamond_axe""}");
             writer.WriteLine(@"	]");
             writer.WriteLine(@"}");
 
@@ -353,6 +402,11 @@ namespace EGoldBlockCreator.Controllers
         string ModelName(int d)
         {
             return ModelsFolder() + "/customblock_" + (d-1).ToString() + ".json";
+        }
+
+        string HandModelName(int d)
+        {
+            return ModelsFolder() + "/hand_customblock_" + (d - 1).ToString() + ".json";
         }
 
         string MobSpawnerCageName()
