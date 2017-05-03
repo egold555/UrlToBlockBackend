@@ -10,7 +10,7 @@ namespace EGoldBlockCreator.Controllers
     {
         public ActionResult Index()
         {
-            return Redirect("https://github.com/egold555/UrlToBlock");
+            return Redirect("https://www.spigotmc.org/resources/urltoblock.40330/");
         }
 
     }

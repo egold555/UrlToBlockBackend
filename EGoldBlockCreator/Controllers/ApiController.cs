@@ -119,13 +119,15 @@ namespace EGoldBlockCreator.Controllers
                     return "@FAILURE: Could not read texture: " + error;
                 }
 
-                try
-                {
+                int numFrames;
+
+                try {
                     string newTextureFile = TempFile(".png");
 
                     using (Bitmap bitmap = (Bitmap) Image.FromFile(textureFile))
                     {
-                        Bitmap newBitmap = RescaleImage(bitmap, GetBestSize(bitmap.Size));
+                       
+                        Bitmap newBitmap = RescaleImage(bitmap, GetBestSize(bitmap.Size), out numFrames);
                         newBitmap.Save(newTextureFile);
                     }
 
@@ -153,6 +155,13 @@ namespace EGoldBlockCreator.Controllers
 
                         string textureName = TextureName(damage);
                         zipFile.AddEntry(textureName, stm);
+
+                        if (numFrames > 1) {
+                            string animatedTextureName = AnimatedTextureName(damage);
+                            byte[] content = GetMcMeta(numFrames);
+
+                            zipFile.AddEntry(animatedTextureName, content);
+                        }
 
                         string modelName = ModelName(damage);
                         string modelContent = System.IO.File.ReadAllText(Server.MapPath("~/App_Data/default_model.json"), Encoding.UTF8);
@@ -196,11 +205,14 @@ namespace EGoldBlockCreator.Controllers
             {
                 UpdateZip(guid, (ZipFile zipFile) => {
                     string textureName = TextureName(damage);
+                    string animatedTextureName = AnimatedTextureName(damage);
                     string modelName = ModelName(damage);
                     string handModelName = HandModelName(damage);
 
                     if (zipFile.ContainsEntry(textureName))
                         zipFile.RemoveEntry(textureName);
+                    if (zipFile.ContainsEntry(animatedTextureName))
+                        zipFile.RemoveEntry(animatedTextureName);
                     if (zipFile.ContainsEntry(modelName))
                         zipFile.RemoveEntry(modelName);
                     if (zipFile.ContainsEntry(handModelName))
@@ -223,7 +235,13 @@ namespace EGoldBlockCreator.Controllers
         Size GetBestSize(Size existing)
         {
             int size;
-            int biggest = Math.Max(existing.Width, existing.Height);
+            int biggest;
+
+            if (existing.Height < existing.Width * 2)
+                biggest = Math.Max(existing.Width, existing.Height);
+            else
+                biggest = existing.Width;
+
             if (biggest >= 256)
                 size = 256;
             else if (biggest >= 128)
@@ -238,22 +256,66 @@ namespace EGoldBlockCreator.Controllers
             return new Size(size, size);
         }
 
-        Bitmap RescaleImage(Bitmap source, Size size)
+        Bitmap RescaleImage(Bitmap source, Size size, out int numFrames)
         {
-            // 1st bullet, pixel format
-            var bmp = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppArgb);
-
-            // 2nd bullet, resolution
-            using (var gr = Graphics.FromImage(bmp))
-            {
-                // 3rd bullet, background
-                gr.Clear(Color.Transparent);
-                // 4th bullet, interpolation
-                gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                gr.DrawImage(source, new Rectangle(0, 0, size.Width, size.Height));
+            numFrames = 1;
+            try {
+                numFrames = source.GetFrameCount(FrameDimension.Time);
             }
+            catch (Exception) { }
 
-            return bmp;
+            if (numFrames > 1)
+            {
+                var bmp = new Bitmap(size.Width, size.Height * numFrames, PixelFormat.Format32bppArgb);
+
+                using (var gr = Graphics.FromImage(bmp)) {
+                    gr.Clear(Color.Transparent);
+                    gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    for (int frame = 0; frame < numFrames; ++frame) {
+                        source.SelectActiveFrame(FrameDimension.Time, frame);
+                        gr.DrawImage(source, new Rectangle(0, size.Height * frame, size.Width, size.Height));
+                    }
+                }
+
+                return bmp;
+            }
+            
+            if (source.Height >= source.Width * 2 && source.Height % source.Width == 0) {
+                // Minecraft-style animated texture.
+
+                numFrames = source.Height / source.Width;
+
+                // 1st bullet, pixel format
+                var bmp = new Bitmap(size.Width, size.Height * numFrames, PixelFormat.Format32bppArgb);
+
+                // 2nd bullet, resolution
+                using (var gr = Graphics.FromImage(bmp)) {
+                    // 3rd bullet, background
+                    gr.Clear(Color.Transparent);
+                    // 4th bullet, interpolation
+                    gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    gr.DrawImage(source, new Rectangle(0, 0, size.Width, size.Height * numFrames));
+                }
+
+                return bmp;
+            }
+            else 
+            {
+                // 1st bullet, pixel format
+                var bmp = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppArgb);
+
+                // 2nd bullet, resolution
+                using (var gr = Graphics.FromImage(bmp))
+                {
+                    // 3rd bullet, background
+                    gr.Clear(Color.Transparent);
+                    // 4th bullet, interpolation
+                    gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    gr.DrawImage(source, new Rectangle(0, 0, size.Width, size.Height));
+                }
+
+                return bmp;
+            }
         }
 
         private string ReadTexture(string textureUrl, out string error)
@@ -353,6 +415,31 @@ namespace EGoldBlockCreator.Controllers
             return stream.ToArray();
         }
 
+        byte[] GetMcMeta(int numFrames)
+        {
+            MemoryStream stream = new MemoryStream();
+            TextWriter writer = new StreamWriter(stream);
+
+            writer.WriteLine(@"{");
+            writer.WriteLine(@"    ""animation"": {");
+            writer.WriteLine(@"        ""frames"": [");
+
+            for (int i = 0; i < numFrames; ++i) {
+                writer.Write(@"{ ""index"": " + i.ToString() + @", ""time"": 1}");
+                if (i != numFrames - 1)
+                    writer.Write(@",");
+                writer.WriteLine();
+            }
+
+            writer.WriteLine(@"        ]");
+            writer.WriteLine(@"    }");
+            writer.WriteLine(@"}");
+
+            writer.Flush();
+
+            return stream.ToArray();
+        }
+
         List<int> UsedDamages(Guid guid)
         {
             List<int> used = new List<int>();
@@ -397,6 +484,11 @@ namespace EGoldBlockCreator.Controllers
         string TextureName(int d)
         {
             return TexturesFolder() + "/customblock_" + (d-1).ToString() + ".png";
+        }
+
+        string AnimatedTextureName(int d)
+        {
+            return TexturesFolder() + "/customblock_" + (d - 1).ToString() + ".png.mcmeta";
         }
 
         string ModelName(int d)
