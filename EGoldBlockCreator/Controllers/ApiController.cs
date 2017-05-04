@@ -20,25 +20,27 @@ namespace EGoldBlockCreator.Controllers
         CloudBlobContainer blobContainer = null;
         const int maxDamage = 1559;
 
-        public string GetUrl(string uuid, bool spawner)
+        public string GetUrl(string uuid, bool spawner, string merge)
         {
             Guid guid;
             
             if (!string.IsNullOrWhiteSpace(uuid) && Guid.TryParse(uuid, out guid))
             {
-                UpdateZip(guid, (zipFile) => 
+                CloudBlockBlob blob = UpdateZipToSecondary(guid, (zipFile) => 
                 {
+                    bool update;
+
                     if (spawner)
                     {
                         // We want the file in there.
                         if (!zipFile.ContainsEntry(MobSpawnerCageName()))
                         {
                             zipFile.AddEntry(MobSpawnerCageName(), System.IO.File.ReadAllBytes(Server.MapPath("~/App_Data/mob_spawner_cage.json")));
-                            return true;
+                            update = true;
                         }
                         else
                         {
-                            return false;
+                            update = false;
                         }
                     }
                     else
@@ -47,16 +49,27 @@ namespace EGoldBlockCreator.Controllers
                         if (zipFile.ContainsEntry(MobSpawnerCageName()))
                         {
                             zipFile.RemoveEntry(MobSpawnerCageName());
-                            return true;
+                            update = true;
                         }
                         else
                         {
-                            return false;
+                            update = false;
                         }
                     }
+
+                    if (!string.IsNullOrEmpty(merge)) {
+                        byte[] externalZipData = DownloadExternalTexturePack(merge);
+                        if (externalZipData != null) {
+                            using (ZipFile externalZip = ZipFile.Read(new MemoryStream(externalZipData))) {
+                                MergeZip(zipFile, externalZip);
+                                update = true;
+                            }
+                        }
+                    }
+
+                    return update;
                 });
 
-                CloudBlockBlob blob = GetBlob(guid);
                 return blob.Uri.ToString();
             }
             else
@@ -318,6 +331,33 @@ namespace EGoldBlockCreator.Controllers
             }
         }
 
+        private byte[] DownloadExternalTexturePack(string urlExternalTexturePack)
+        {
+            try {
+                WebClient webClient = new WebClient();
+                webClient.CachePolicy = new System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.Default);
+                return webClient.DownloadData(urlExternalTexturePack);
+            }
+            catch (Exception e) {
+                return null;
+            }
+        }
+
+        // Merge any entries from "mergeFrom" into "zipFile". Will not overwrite entries in the 
+        // existing zipFile.
+        private void MergeZip(ZipFile zipFile, ZipFile mergeFrom)
+        {
+            foreach (ZipEntry entry in mergeFrom) {
+                string fileName = entry.FileName;
+                if (! zipFile.ContainsEntry(fileName)) {
+                    // Copy the entry into the zipFile.
+                    MemoryStream stream = new MemoryStream();
+                    entry.Extract(stream);
+                    zipFile.AddEntry(fileName, stream.GetBuffer());
+                }
+            }
+        }
+
         private string ReadTexture(string textureUrl, out string error)
         {
             string fileName = TempFile(Path.GetExtension(new Uri(textureUrl).AbsolutePath));
@@ -533,6 +573,25 @@ namespace EGoldBlockCreator.Controllers
             }
             System.IO.File.Delete(tempPath);
         }
+
+        CloudBlockBlob UpdateZipToSecondary(Guid guid, Func<ZipFile, bool> processZip)
+        {
+            string tempPath = TempFile(".zip");
+            CloudBlockBlob blob = GetBlob(guid);
+            blob.DownloadToFile(tempPath, FileMode.Create);
+            ZipFile zipFile = ZipFile.Read(tempPath);
+            bool changed = processZip(zipFile);
+            zipFile.Save();
+            zipFile.Dispose();
+            if (changed) {
+                blob = GetSecondaryBlob(guid);
+                blob.UploadFromFile(tempPath);
+            }
+            System.IO.File.Delete(tempPath);
+
+            return blob;
+        }
+
         void DeleteBlob(Guid guid)
         {
             CloudBlockBlob blockBlob = BlobContainer.GetBlockBlobReference("rp-" + guid.ToString() + ".zip");
@@ -556,6 +615,12 @@ namespace EGoldBlockCreator.Controllers
                 }
             }
 
+            return blockBlob;
+        }
+
+        CloudBlockBlob GetSecondaryBlob(Guid guid)
+        {
+            CloudBlockBlob blockBlob = BlobContainer.GetBlockBlobReference("rpx-" + guid.ToString() + ".zip");
             return blockBlob;
         }
 
