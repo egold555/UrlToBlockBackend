@@ -19,6 +19,7 @@ namespace EGoldBlockCreator.Controllers
     {
         CloudBlobContainer blobContainer = null;
         const int maxDamage = 1559;
+        const string packMcMeta = "pack.mcmeta";
 
         public string GetUrl(string uuid, bool spawner, string merge)
         {
@@ -64,6 +65,18 @@ namespace EGoldBlockCreator.Controllers
                                 MergeZip(zipFile, externalZip);
                                 update = true;
                             }
+                        }
+                    }
+
+                    if (zipFile.ContainsEntry(packMcMeta)) {
+                        ZipEntry entry = zipFile[packMcMeta];
+                        MemoryStream memStream = new MemoryStream();
+                        entry.Extract(memStream);
+                        string value = Encoding.UTF8.GetString(memStream.ToArray());
+                        if (!value.Contains("UrlToBlock plugin")) {
+                            zipFile.RemoveEntry(packMcMeta);
+                            zipFile.AddEntry(packMcMeta, System.IO.File.ReadAllBytes(Server.MapPath("~/App_Data/pack.mcmeta")));
+                            update = true;
                         }
                     }
 
