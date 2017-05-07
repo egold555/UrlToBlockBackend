@@ -182,7 +182,7 @@ namespace EGoldBlockCreator.Controllers
 
                     System.IO.File.Delete(downloadedFileName);
                 }
-                catch (Exception e)
+                catch (Exception)
                 {
                     return ("@FAILURE: The image file appears to be invalid.");
                 }
@@ -308,8 +308,9 @@ namespace EGoldBlockCreator.Controllers
             return new Size(size, size);
         }
 
-        Bitmap RescaleImage(Bitmap source, Size size, int row, int col, int totalRows, int totalCols, out int numFrames)
+        Bitmap RescaleImage(Bitmap source, Size destSize, int row, int col, int totalRows, int totalCols, out int numFrames)
         {
+            Size sourceSize = source.Size;
             numFrames = 1;
             try {
                 numFrames = source.GetFrameCount(FrameDimension.Time);
@@ -318,14 +319,19 @@ namespace EGoldBlockCreator.Controllers
 
             if (numFrames > 1)
             {
-                var bmp = new Bitmap(size.Width, size.Height * numFrames, PixelFormat.Format32bppArgb);
+                var bmp = new Bitmap(destSize.Width, destSize.Height * numFrames, PixelFormat.Format32bppArgb);
 
                 using (var gr = Graphics.FromImage(bmp)) {
                     gr.Clear(Color.Transparent);
                     gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+
                     for (int frame = 0; frame < numFrames; ++frame) {
                         source.SelectActiveFrame(FrameDimension.Time, frame);
-                        gr.DrawImage(source, new Rectangle(0, size.Height * frame, size.Width, size.Height));
+
+                        Rectangle dest = new Rectangle(0, destSize.Height * frame, destSize.Width, destSize.Height);
+                        Rectangle src = Rectangle.FromLTRB(col * sourceSize.Width / totalCols, row * sourceSize.Height / totalRows, (col + 1) * sourceSize.Width / totalCols, (row + 1) * sourceSize.Height / totalRows);
+
+                        gr.DrawImage(source, dest, src, GraphicsUnit.Pixel);
                     }
                 }
 
@@ -336,31 +342,35 @@ namespace EGoldBlockCreator.Controllers
                 // Minecraft-style animated texture.
 
                 numFrames = source.Height / source.Width;
+                sourceSize.Height = source.Width;
 
-                // 1st bullet, pixel format
-                var bmp = new Bitmap(size.Width, size.Height * numFrames, PixelFormat.Format32bppArgb);
+                var bmp = new Bitmap(destSize.Width, destSize.Height * numFrames, PixelFormat.Format32bppArgb);
 
-                // 2nd bullet, resolution
                 using (var gr = Graphics.FromImage(bmp)) {
-                    // 3rd bullet, background
                     gr.Clear(Color.Transparent);
-                    // 4th bullet, interpolation
                     gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                    gr.DrawImage(source, new Rectangle(0, 0, size.Width, size.Height * numFrames));
+
+                    for (int frame = 0; frame < numFrames; ++frame) {
+                        int srcFrameOffset = sourceSize.Height * frame;
+                        Rectangle dest = new Rectangle(0, destSize.Height * frame, destSize.Width, destSize.Height);
+                        Rectangle src = Rectangle.FromLTRB(col * sourceSize.Width / totalCols, srcFrameOffset + row * sourceSize.Height / totalRows, 
+                                                           (col + 1) * sourceSize.Width / totalCols, srcFrameOffset + (row + 1) * sourceSize.Height / totalRows);
+
+                        gr.DrawImage(source, dest, src, GraphicsUnit.Pixel);
+                    }
                 }
 
                 return bmp;
             }
             else 
             {
-                var bmp = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppArgb);
-                Size sourceSize = source.Size;
+                var bmp = new Bitmap(destSize.Width, destSize.Height, PixelFormat.Format32bppArgb);
 
                 using (var gr = Graphics.FromImage(bmp))
                 {
                     gr.Clear(Color.Transparent);
                     gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                    Rectangle dest = new Rectangle(0, 0, size.Width, size.Height * numFrames);
+                    Rectangle dest = new Rectangle(0, 0, destSize.Width, destSize.Height);
                     Rectangle src = Rectangle.FromLTRB(col * sourceSize.Width / totalCols, row * sourceSize.Height / totalRows, (col + 1) * sourceSize.Width / totalCols, (row + 1) * sourceSize.Height / totalRows);
                     gr.DrawImage(source, dest, src, GraphicsUnit.Pixel);
                 }
@@ -376,7 +386,7 @@ namespace EGoldBlockCreator.Controllers
                 webClient.CachePolicy = new System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.Default);
                 return webClient.DownloadData(urlExternalTexturePack);
             }
-            catch (Exception e) {
+            catch (Exception) {
                 return null;
             }
         }
