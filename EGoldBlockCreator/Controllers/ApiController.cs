@@ -97,22 +97,26 @@ namespace EGoldBlockCreator.Controllers
             if (!string.IsNullOrWhiteSpace(uuid) && Guid.TryParse(uuid, out guid))
             {
                 List<int> used = UsedDamages(guid);
-                StringBuilder builder = new StringBuilder();
-                bool first = true;
-                foreach (int d in used)
-                {
-                    if (!first)
-                        builder.Append(',');
-                    builder.Append(d.ToString());
-                    first = false;
-                }
-
-                return builder.ToString();
+                return IntListToString(used);
             }
             else
             {
                 return "@FAILURE: uuid is not in a recognized format";
             }
+        }
+
+        private string IntListToString(List<int> l)
+        {
+            StringBuilder builder = new StringBuilder();
+            bool first = true;
+            foreach (int d in l) {
+                if (!first)
+                    builder.Append(',');
+                builder.Append(d.ToString());
+                first = false;
+            }
+
+            return builder.ToString();
         }
 
         public string DeleteAll(string uuid)
@@ -131,7 +135,17 @@ namespace EGoldBlockCreator.Controllers
 
         }
 
+        public string AddTiled(string uuid, string texture, int width, int height)
+        {
+            return AddTextureWorker(uuid, texture, width, height);
+        }
+
         public string AddTexture(string uuid, string texture)
+        {
+            return AddTextureWorker(uuid, texture, 1, 1);
+        }
+
+        public string AddTextureWorker(string uuid, string texture, int width, int height)
         {
             Guid guid;
 
@@ -139,48 +153,58 @@ namespace EGoldBlockCreator.Controllers
             {
                 string error = null;
                 Uri url = new Uri(texture);
-                string textureFile = ReadTexture(texture, out error);
-                if (textureFile == null)
+                string downloadedFileName = ReadTexture(texture, out error);
+                if (downloadedFileName == null)
                 {
                     return "@FAILURE: Could not read texture: " + error;
                 }
 
-                int numFrames;
+                int numFrames = 1;
+                List<string> textureFiles = new List<string>();
 
                 try {
-                    string newTextureFile = TempFile(".png");
 
-                    using (Bitmap bitmap = (Bitmap) Image.FromFile(textureFile))
+                    using (Bitmap bitmap = (Bitmap) Image.FromFile(downloadedFileName))
                     {
+                        for (int row = 0; row < height; ++row) {
+                            for (int col = 0; col < width; ++col) {
+                                Size tileSize = bitmap.Size;
+                                tileSize.Width = tileSize.Width / width;
+                                tileSize.Height = tileSize.Height / height;
+                                Bitmap newBitmap = RescaleImage(bitmap, GetBestSize(tileSize), row, col, height, width, out numFrames);
+                                string newTextureFile = TempFile(".png");
+                                newBitmap.Save(newTextureFile);
+                                textureFiles.Add(newTextureFile);
+                            }
+                        }
                        
-                        Bitmap newBitmap = RescaleImage(bitmap, GetBestSize(bitmap.Size), out numFrames);
-                        newBitmap.Save(newTextureFile);
                     }
 
-                    System.IO.File.Delete(textureFile);
-                    textureFile = newTextureFile;
+                    System.IO.File.Delete(downloadedFileName);
                 }
-                catch (Exception)
+                catch (Exception e)
                 {
                     return ("@FAILURE: The image file appears to be invalid.");
                 }
 
-                int damage = -1;
-
+                List<int> damages = new List<int>();
                 error = null;
 
-                using (Stream stm = new FileStream(textureFile, FileMode.Open, FileAccess.Read))
-                {
-                    UpdateZip(guid, (ZipFile zipFile) => {
-                        damage = FirstFreeDamage(zipFile);
+                UpdateZip(guid, (ZipFile zipFile) => {
+
+                    foreach (string textureFile in textureFiles) {
+                        int damage = FirstFreeDamage(zipFile);
                         if (damage < 0)
                         {
                             error = "Maximum number of blocks reached";
                             return false;
                         }
+                        damages.Add(damage);
 
                         string textureName = TextureName(damage);
-                        zipFile.AddEntry(textureName, stm);
+                        zipFile.AddEntry(textureName,
+                                         (entryName) => { return new FileStream(textureFile, FileMode.Open, FileAccess.Read); },
+                                         (entryName, stream) => { stream.Close(); });
 
                         if (numFrames > 1) {
                             string animatedTextureName = AnimatedTextureName(damage);
@@ -201,16 +225,18 @@ namespace EGoldBlockCreator.Controllers
 
                         UpdateHoeModel(zipFile);
                         UpdateAxeModel(zipFile);
+                    }
 
-                        return true;
-                    });
+                    return true;
+                });
+
+                foreach (string textureFile in textureFiles) {
+                    System.IO.File.Delete(textureFile);
                 }
-
-                System.IO.File.Delete(textureFile);
 
                 if (string.IsNullOrEmpty(error))
                 {
-                    return damage.ToString();
+                    return IntListToString(damages);
                 }
                 else
                 {
@@ -282,7 +308,7 @@ namespace EGoldBlockCreator.Controllers
             return new Size(size, size);
         }
 
-        Bitmap RescaleImage(Bitmap source, Size size, out int numFrames)
+        Bitmap RescaleImage(Bitmap source, Size size, int row, int col, int totalRows, int totalCols, out int numFrames)
         {
             numFrames = 1;
             try {
@@ -327,17 +353,16 @@ namespace EGoldBlockCreator.Controllers
             }
             else 
             {
-                // 1st bullet, pixel format
                 var bmp = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppArgb);
+                Size sourceSize = source.Size;
 
-                // 2nd bullet, resolution
                 using (var gr = Graphics.FromImage(bmp))
                 {
-                    // 3rd bullet, background
                     gr.Clear(Color.Transparent);
-                    // 4th bullet, interpolation
                     gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                    gr.DrawImage(source, new Rectangle(0, 0, size.Width, size.Height));
+                    Rectangle dest = new Rectangle(0, 0, size.Width, size.Height * numFrames);
+                    Rectangle src = Rectangle.FromLTRB(col * sourceSize.Width / totalCols, row * sourceSize.Height / totalRows, (col + 1) * sourceSize.Width / totalCols, (row + 1) * sourceSize.Height / totalRows);
+                    gr.DrawImage(source, dest, src, GraphicsUnit.Pixel);
                 }
 
                 return bmp;
