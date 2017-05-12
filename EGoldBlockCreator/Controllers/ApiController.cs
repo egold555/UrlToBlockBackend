@@ -91,16 +91,75 @@ namespace EGoldBlockCreator.Controllers
             }
         }
 
-        public string GetTextures(string uuid)
+        public string GetTexturesAndNames(string uuid)
         {
             Guid guid;
             if (!string.IsNullOrWhiteSpace(uuid) && Guid.TryParse(uuid, out guid))
             {
-                List<int> used = UsedDamages(guid);
-                return IntListToString(used);
+                List<int> used = null;
+                Dictionary<int, NameAndLore> namesAndLore = null;
+
+                UpdateZip(guid, (ZipFile zipFile) =>
+                {
+                    used = UsedDamages(zipFile);
+                    namesAndLore = ReadNameAndLore(zipFile);
+                    return false;
+                });
+
+                StringBuilder builder = new StringBuilder();
+                foreach (int damage in used) {
+                    if (namesAndLore.ContainsKey(damage)) {
+                        builder.Append(namesAndLore[damage].ToLine());
+                    }
+                    else {
+                        builder.Append(damage.ToString() + "&&");
+                    }
+                    builder.Append("|");
+                }
+
+                return builder.ToString();
             }
             else
             {
+                return "@FAILURE: uuid is not in a recognized format";
+            }
+        }
+
+        public string GetTextures(string uuid)
+        {
+            Guid guid;
+            if (!string.IsNullOrWhiteSpace(uuid) && Guid.TryParse(uuid, out guid)) {
+                List<int> used = UsedDamages(guid);
+                return IntListToString(used);
+            }
+            else {
+                return "@FAILURE: uuid is not in a recognized format";
+            }
+        }
+
+        public string Rename(string uuid, int damage, string name)
+        {
+            Guid guid;
+            if (!string.IsNullOrWhiteSpace(uuid) && Guid.TryParse(uuid, out guid)) {
+                Dictionary<int, NameAndLore> namesAndLore = null;
+
+                UpdateZip(guid, (ZipFile zipFile) => {
+                    namesAndLore = ReadNameAndLore(zipFile);
+                    NameAndLore newNameAndLore;
+                    if (namesAndLore.ContainsKey(damage)) {
+                        newNameAndLore = new NameAndLore(damage, name, namesAndLore[damage].Lore);
+                    }
+                    else {
+                        newNameAndLore = new NameAndLore(damage, name, "");
+                    }
+
+                    namesAndLore[damage] = newNameAndLore;
+                    return true;
+                });
+
+                return "OK";
+            }
+            else {
                 return "@FAILURE: uuid is not in a recognized format";
             }
         }
@@ -135,17 +194,17 @@ namespace EGoldBlockCreator.Controllers
 
         }
 
-        public string AddTiled(string uuid, string texture, int width, int height)
+        public string AddTiled(string uuid, string texture, int width, int height, string name)
         {
-            return AddTextureWorker(uuid, texture, width, height);
+            return AddTextureWorker(uuid, texture, width, height, name);
         }
 
-        public string AddTexture(string uuid, string texture)
+        public string AddTexture(string uuid, string texture, string name)
         {
-            return AddTextureWorker(uuid, texture, 1, 1);
+            return AddTextureWorker(uuid, texture, 1, 1, name);
         }
 
-        public string AddTextureWorker(string uuid, string texture, int width, int height)
+        public string AddTextureWorker(string uuid, string texture, int width, int height, string name)
         {
             Guid guid;
 
@@ -191,6 +250,9 @@ namespace EGoldBlockCreator.Controllers
                 error = null;
 
                 UpdateZip(guid, (ZipFile zipFile) => {
+                    int texNum = 0;
+
+                    Dictionary<int, NameAndLore> namesAndLore = ReadNameAndLore(zipFile);
 
                     foreach (string textureFile in textureFiles) {
                         int damage = FirstFreeDamage(zipFile);
@@ -225,8 +287,14 @@ namespace EGoldBlockCreator.Controllers
 
                         UpdateHoeModel(zipFile);
                         UpdateAxeModel(zipFile);
+
+                        
+                        namesAndLore[damage] = GetNameAndLore(damage, texture, name, texNum, width, height);
+
+                        ++texNum;
                     }
 
+                    WriteNameAndLore(zipFile, namesAndLore.Values);
                     return true;
                 });
 
@@ -247,6 +315,42 @@ namespace EGoldBlockCreator.Controllers
             {
                 return "@FAILURE: uuid is not in a recognized format";
             }
+        }
+
+        private NameAndLore GetNameAndLore(int damage, string texture, string name, int texNum, int width, int height)
+        {
+            if (name == null)
+                name = Path.GetFileNameWithoutExtension(new Uri(texture).LocalPath);
+
+            string lore = "";
+            if (width > 1 || height > 1) {
+                int row = texNum / width;
+                int col = texNum % width;
+                lore = GetTiledLore(width, height, row, col);
+            }
+
+            return new NameAndLore(damage, name, lore);
+        }
+
+        private string GetTiledLore(int width, int height, int row, int col)
+        {
+            StringBuilder builder = new StringBuilder();
+
+            for (int r = 0; r < height; ++r) {
+                for (int c = 0; c < width; ++c) {
+                    if (r == row && c == col) {
+                        builder.Append("\u25A0 ");
+                    }
+                    else {
+                        builder.Append("\u25A1 ");
+                    }
+                }
+
+                if (r != height-1)
+                    builder.Append("\r\n");
+            }
+
+            return builder.ToString();
         }
 
         public string DeleteTexture(string uuid, int damage)
@@ -272,6 +376,10 @@ namespace EGoldBlockCreator.Controllers
 
                     UpdateHoeModel(zipFile);
                     UpdateAxeModel(zipFile);
+
+                    Dictionary<int, NameAndLore> namesAndLore = ReadNameAndLore(zipFile);
+                    namesAndLore.Remove(damage);
+                    WriteNameAndLore(zipFile, namesAndLore.Values);
 
                     return true;
                 });
@@ -323,7 +431,7 @@ namespace EGoldBlockCreator.Controllers
 
                 using (var gr = Graphics.FromImage(bmp)) {
                     gr.Clear(Color.Transparent);
-                    gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    gr.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
 
                     for (int frame = 0; frame < numFrames; ++frame) {
                         source.SelectActiveFrame(FrameDimension.Time, frame);
@@ -348,13 +456,18 @@ namespace EGoldBlockCreator.Controllers
 
                 using (var gr = Graphics.FromImage(bmp)) {
                     gr.Clear(Color.Transparent);
-                    gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    gr.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
 
                     for (int frame = 0; frame < numFrames; ++frame) {
                         int srcFrameOffset = sourceSize.Height * frame;
                         Rectangle dest = new Rectangle(0, destSize.Height * frame, destSize.Width, destSize.Height);
                         Rectangle src = Rectangle.FromLTRB(col * sourceSize.Width / totalCols, srcFrameOffset + row * sourceSize.Height / totalRows, 
                                                            (col + 1) * sourceSize.Width / totalCols, srcFrameOffset + (row + 1) * sourceSize.Height / totalRows);
+
+                        if (src.Width * 2 <= dest.Width)
+                            gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                        else
+                            gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
 
                         gr.DrawImage(source, dest, src, GraphicsUnit.Pixel);
                     }
@@ -369,9 +482,15 @@ namespace EGoldBlockCreator.Controllers
                 using (var gr = Graphics.FromImage(bmp))
                 {
                     gr.Clear(Color.Transparent);
-                    gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    gr.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
                     Rectangle dest = new Rectangle(0, 0, destSize.Width, destSize.Height);
                     Rectangle src = Rectangle.FromLTRB(col * sourceSize.Width / totalCols, row * sourceSize.Height / totalRows, (col + 1) * sourceSize.Width / totalCols, (row + 1) * sourceSize.Height / totalRows);
+
+                    if (src.Width * 2 <= dest.Width)
+                        gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                    else
+                        gr.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+
                     gr.DrawImage(source, dest, src, GraphicsUnit.Pixel);
                 }
 
@@ -526,6 +645,38 @@ namespace EGoldBlockCreator.Controllers
             writer.Flush();
 
             return stream.ToArray();
+        }
+
+        Dictionary<int, NameAndLore> ReadNameAndLore(ZipFile zipFile)
+        {
+            Dictionary<int, NameAndLore> result = new Dictionary<int, NameAndLore>();
+
+            if (zipFile.ContainsEntry("names.txt")) {
+                using (Stream stream = zipFile["names.txt"].OpenReader()) {
+                    using (TextReader reader = new StreamReader(stream, Encoding.UTF8)) {
+                        string line;
+                        while ((line = reader.ReadLine()) != null) {
+                            NameAndLore nameAndLore = new NameAndLore(line);
+                            result[nameAndLore.Damage] = nameAndLore;
+                        }
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        void WriteNameAndLore(ZipFile zipFile, IEnumerable<NameAndLore> list)
+        {
+            if (zipFile.ContainsEntry("names.txt"))
+                zipFile.RemoveEntry("names.txt");
+
+            StringBuilder builder = new StringBuilder();
+            foreach (NameAndLore nameAndLore in list) {
+                builder.AppendLine(nameAndLore.ToLine());
+            }
+
+            zipFile.AddEntry("names.txt", builder.ToString(), Encoding.UTF8);
         }
 
         List<int> UsedDamages(Guid guid)
@@ -695,6 +846,36 @@ namespace EGoldBlockCreator.Controllers
         string TempFile(string extension)
         {
             return Path.ChangeExtension(System.IO.Path.GetTempPath() + Guid.NewGuid().ToString(), extension);
+        }
+
+
+
+        class NameAndLore
+        {
+            public int Damage;
+            public string Name;
+            public string Lore;
+            public NameAndLore(int damage, string name, string lore)
+            {
+                this.Damage = damage;
+                this.Name = name;
+                this.Lore = lore;
+            }
+
+            public NameAndLore(string text)
+            {
+                string[] fields = text.Split('&');
+                if (fields.Length == 3) {
+                    this.Damage = int.Parse(fields[0]);
+                    this.Name = HttpUtility.UrlDecode(fields[1]);
+                    this.Lore = HttpUtility.UrlDecode(fields[2]);
+                }
+            }
+
+            public string ToLine()
+            {
+                return Damage.ToString() + "&" + HttpUtility.UrlEncode(Name ?? "") + "&" + HttpUtility.UrlEncode(Lore ?? "");
+            }
         }
     }
 }
