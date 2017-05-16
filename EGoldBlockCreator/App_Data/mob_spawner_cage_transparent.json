@@ -1,0 +1,12 @@
+{
+    "parent": "block/small_cube",
+    "textures": {
+        "particle": "blocks/mob_spawner",
+        "down": "blocks/transparent",
+        "up": "blocks/transparent",
+        "north": "blocks/transparent",
+        "south": "blocks/transparent",
+        "west": "blocks/transparent",
+        "east": "blocks/transparent"
+    }
+}

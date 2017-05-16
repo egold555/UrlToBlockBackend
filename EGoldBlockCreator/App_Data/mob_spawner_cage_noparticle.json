@@ -1,7 +1,7 @@
 {
     "parent": "block/small_cube",
     "textures": {
-        "particle": "blocks/mob_spawner",
+        "particle": "blocks/transparent",
         "down": "blocks/mob_spawner",
         "up": "blocks/mob_spawner",
         "north": "blocks/mob_spawner",

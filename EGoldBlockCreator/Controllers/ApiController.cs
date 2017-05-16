@@ -21,41 +21,48 @@ namespace EGoldBlockCreator.Controllers
         const int maxDamage = 1559;
         const string packMcMeta = "pack.mcmeta";
 
-        public string GetUrl(string uuid, bool spawner, string merge)
+        public string GetUrl(string uuid, bool spawner, bool? transparent, string merge)
         {
             Guid guid;
             
             if (!string.IsNullOrWhiteSpace(uuid) && Guid.TryParse(uuid, out guid))
             {
-                CloudBlockBlob blob = UpdateZipToSecondary(guid, (zipFile) => 
+                CloudBlockBlob blob = UpdateZip(guid, (zipFile) => 
                 {
-                    bool update;
+                    UpdateType updateType = UpdateType.None;
 
-                    if (spawner)
-                    {
-                        // We want the file in there.
-                        if (!zipFile.ContainsEntry(MobSpawnerCageName()))
-                        {
-                            zipFile.AddEntry(MobSpawnerCageName(), System.IO.File.ReadAllBytes(Server.MapPath("~/App_Data/mob_spawner_cage.json")));
-                            update = true;
+                    string mobCageFileName;
+                    if (transparent.HasValue && transparent.Value) {
+                        if (spawner) {
+                            mobCageFileName = "mob_spawner_cage_transparent_noparticle.json";
                         }
-                        else
-                        {
-                            update = false;
+                        else {
+                            mobCageFileName = "mob_spawner_cage_transparent.json";
                         }
                     }
-                    else
-                    {
-                        // We don't want the file in there.
-                        if (zipFile.ContainsEntry(MobSpawnerCageName()))
-                        {
-                            zipFile.RemoveEntry(MobSpawnerCageName());
-                            update = true;
+                    else {
+                        if (spawner) {
+                            mobCageFileName = "mob_spawner_cage_noparticle.json";
                         }
-                        else
-                        {
-                            update = false;
+                        else {
+                            mobCageFileName = "mob_spawner_cage.json";
                         }
+                    }
+
+                    if (UpdateZipEntryWithFile(zipFile, MobSpawnerCageName(), mobCageFileName)) {
+                        updateType = UpdateType.Primary;
+                    }
+
+                    if (UpdateZipEntryWithFile(zipFile, CustomBlockName(), "custom_block.json")) {
+                        updateType = UpdateType.Primary;
+                    }
+
+                    if (UpdateZipEntryWithFile(zipFile, SmallCubeName(), "small_cube.json")) {
+                        updateType = UpdateType.Primary;
+                    }
+
+                    if (UpdateZipEntryWithFile(zipFile, packMcMeta, "pack.mcmeta")) {
+                        updateType = UpdateType.Primary;
                     }
 
                     if (!string.IsNullOrEmpty(merge)) {
@@ -63,24 +70,12 @@ namespace EGoldBlockCreator.Controllers
                         if (externalZipData != null) {
                             using (ZipFile externalZip = ZipFile.Read(new MemoryStream(externalZipData))) {
                                 MergeZip(zipFile, externalZip);
-                                update = true;
+                                updateType = UpdateType.Secondary;
                             }
                         }
                     }
 
-                    if (zipFile.ContainsEntry(packMcMeta)) {
-                        ZipEntry entry = zipFile[packMcMeta];
-                        MemoryStream memStream = new MemoryStream();
-                        entry.Extract(memStream);
-                        string value = Encoding.UTF8.GetString(memStream.ToArray());
-                        if (!value.Contains("UrlToBlock plugin")) {
-                            zipFile.RemoveEntry(packMcMeta);
-                            zipFile.AddEntry(packMcMeta, System.IO.File.ReadAllBytes(Server.MapPath("~/App_Data/pack.mcmeta")));
-                            update = true;
-                        }
-                    }
-
-                    return update;
+                    return updateType;
                 });
 
                 return blob.Uri.ToString();
@@ -103,7 +98,7 @@ namespace EGoldBlockCreator.Controllers
                 {
                     used = UsedDamages(zipFile);
                     namesAndLore = ReadNameAndLore(zipFile);
-                    return false;
+                    return UpdateType.None;
                 });
 
                 StringBuilder builder = new StringBuilder();
@@ -154,7 +149,7 @@ namespace EGoldBlockCreator.Controllers
                     }
 
                     namesAndLore[damage] = newNameAndLore;
-                    return true;
+                    return UpdateType.Primary;
                 });
 
                 return "OK";
@@ -259,7 +254,7 @@ namespace EGoldBlockCreator.Controllers
                         if (damage < 0)
                         {
                             error = "Maximum number of blocks reached";
-                            return false;
+                            return UpdateType.None;
                         }
                         damages.Add(damage);
 
@@ -295,7 +290,7 @@ namespace EGoldBlockCreator.Controllers
                     }
 
                     WriteNameAndLore(zipFile, namesAndLore.Values);
-                    return true;
+                    return UpdateType.Primary;
                 });
 
                 foreach (string textureFile in textureFiles) {
@@ -381,7 +376,7 @@ namespace EGoldBlockCreator.Controllers
                     namesAndLore.Remove(damage);
                     WriteNameAndLore(zipFile, namesAndLore.Values);
 
-                    return true;
+                    return UpdateType.Primary;
                 });
 
                 return "OK";
@@ -544,6 +539,42 @@ namespace EGoldBlockCreator.Controllers
             return fileName;
         }
 
+        // Update the zip file to have the file given. It must contain the exact same contents. Returns
+        // false if the entry already existed with the same contents, true if the entry was created or updated. 
+        bool UpdateZipEntryWithFile(ZipFile zipFile, string entryName, string fileName)
+        {
+            byte[] newContents = System.IO.File.ReadAllBytes(Server.MapPath("~/App_Data/" + fileName));
+
+            if (zipFile.ContainsEntry(entryName)) {
+                ZipEntry entry = zipFile[entryName];
+                MemoryStream memStream = new MemoryStream();
+                entry.Extract(memStream);
+                byte[] oldContents = memStream.ToArray();
+                if (SameContents(oldContents, newContents)) {
+                    return false;
+                }
+                else {
+                    zipFile.RemoveEntry(entryName);
+                }
+            }
+
+            zipFile.AddEntry(entryName, newContents);
+            return true;
+        }
+
+        private bool SameContents(byte[] oldContents, byte[] newContents)
+        {
+            if (oldContents.Length != newContents.Length)
+                return false;
+
+            for (int i = 0; i < oldContents.Length; ++i) {
+                if (oldContents[i] != newContents[i])
+                    return false;
+            }
+
+            return true;
+        }
+
         void UpdateHoeModel(ZipFile zipFile)
         {
             List<int> usedDamages = UsedDamages(zipFile);
@@ -686,7 +717,7 @@ namespace EGoldBlockCreator.Controllers
             UpdateZip(guid, (ZipFile zipFile) =>
             {
                 used = UsedDamages(zipFile);
-                return false;
+                return UpdateType.None;
             });
 
             return used;
@@ -745,6 +776,21 @@ namespace EGoldBlockCreator.Controllers
             return ModelsFolder() + "/mob_spawner_cage.json";
         }
 
+        string CustomBlockName()
+        {
+            return ModelsFolder() + "/custom_block.json";
+        }
+
+        string SmallCubeName()
+        {
+            return ModelsFolder() + "/small_cube.json";
+        }
+
+        string MobTransparentName()
+        {
+            return TexturesFolder() + "/mob_spawner.png";
+        }
+
         string TexturesFolder()
         {
             return "assets/minecraft/textures/blocks";
@@ -755,35 +801,22 @@ namespace EGoldBlockCreator.Controllers
             return "assets/minecraft/models/block";
         }
 
+        enum UpdateType { None, Primary, Secondary}
 
 
-        void UpdateZip(Guid guid, Func<ZipFile, bool> processZip)
+        CloudBlockBlob UpdateZip(Guid guid, Func<ZipFile, UpdateType> processZip)
         {
             string tempPath = TempFile(".zip");
             CloudBlockBlob blob = GetBlob(guid);
             blob.DownloadToFile(tempPath, FileMode.Create);
             ZipFile zipFile = ZipFile.Read(tempPath);
-            bool changed = processZip(zipFile);
+            UpdateType updateType = processZip(zipFile);
             zipFile.Save();
             zipFile.Dispose();
-            if (changed)
+            if (updateType != UpdateType.None)
             {
-                blob.UploadFromFile(tempPath);
-            }
-            System.IO.File.Delete(tempPath);
-        }
-
-        CloudBlockBlob UpdateZipToSecondary(Guid guid, Func<ZipFile, bool> processZip)
-        {
-            string tempPath = TempFile(".zip");
-            CloudBlockBlob blob = GetBlob(guid);
-            blob.DownloadToFile(tempPath, FileMode.Create);
-            ZipFile zipFile = ZipFile.Read(tempPath);
-            bool changed = processZip(zipFile);
-            zipFile.Save();
-            zipFile.Dispose();
-            if (changed) {
-                blob = GetSecondaryBlob(guid);
+                if (updateType == UpdateType.Secondary)
+                    blob = GetSecondaryBlob(guid);
                 blob.UploadFromFile(tempPath);
             }
             System.IO.File.Delete(tempPath);
